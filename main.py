@@ -78,7 +78,7 @@ async def on_message(message):
     encouragements = []
     if "encouragements" in db.keys():
       encouragements = db["encouragements"]
-    await message.channel.send(encouragements)
+    await message.channel.send(encouragements.value)
 
   if msg.startswith('$responding'):
     value = msg.split('$responding ',1)[1]
