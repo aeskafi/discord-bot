@@ -76,7 +76,7 @@ async def on_message(message):
 
   if msg.startswith('$list'):
     encouragements = []
-    if "encouragements" in db.keys()
+    if "encouragements" in db.keys():
       encouragements = db["encouragements"]
     await message.channel.send(encouragements)
 
