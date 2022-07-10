@@ -54,7 +54,7 @@ async def on_message(message):
   if message.author == client.user:
     return
 
-  if msg.startswith('$inspire'):
+  if msg.startswith('!inspire'):
     quote = get_quote()
     await message.channel.send('“ '+ quote +' “')
 
@@ -66,27 +66,27 @@ async def on_message(message):
     if any(word in msg for word in sad_words):
       await message.channel.send(random.choice(options))
 
-  if msg.startswith('$new'):
-    encouraging_message = msg.split("$new ", 1)[1]
+  if msg.startswith('!add'):
+    encouraging_message = msg.split("!add ", 1)[1]
     update_encouragements(encouraging_message)
     await message.channel.send("New encouraging message added.")
 
-    if msg.startswith('$del'):
+    if msg.startswith('!del'):
       encouragements = []
       if "encouragements" in db.keys():
-        index = int(msg.split("$db", 1)[1])
+        index = int(msg.split("!del", 1)[1])
         delete_encouragment(index)
         encouragements = db["encouragements"]
       await message.channel.send(encouragements)
 
-  if msg.startswith('$list'):
+  if msg.startswith('!list'):
     encouragements = []
     if "encouragements" in db.keys():
       encouragements = db["encouragements"]
     await message.channel.send(encouragements.value)
 
-  if msg.startswith('$responding'):
-    value = msg.split('$responding ',1)[1]
+  if msg.startswith('!responding'):
+    value = msg.split('!responding ',1)[1]
 
     if value.lower() == "true":
       db["responding"] = True
@@ -95,10 +95,11 @@ async def on_message(message):
       db["responding"] = False
       await message.channel.send("Responding is off.")
 
-
-  if msg.startswith('remind'):
-    time = msg.split('remind ', 1)[1]
-    reminder = "Task"
+  # reminder base on time !!!
+  # {n}{s/m/h/d}
+  if msg.startswith('!remind'):
+    time = msg.split('!remind ', 1)[1]
+    reminder = msg.split('!remind ',1)[2]
     print(time)
     print(reminder)
     user = message.author
