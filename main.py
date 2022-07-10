@@ -4,6 +4,7 @@ import requests
 import json
 import random
 from replit import db
+from keep_alive import keep_alive
 
 client = discord.Client()
 sad_words = ["sad", "depressed", "unhappy", "angry", "miserable", "depressing"]
@@ -92,4 +93,5 @@ async def on_message(message):
 
 
 TOKEN = os.environ['TOKEN']
+keep_alive()
 client.run(TOKEN)
