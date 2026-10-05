@@ -1,142 +1,249 @@
-import discord
 import os
-import requests
+import sys
 import json
 import random
-from replit import db
-from keep_alive import keep_alive
-# for reminder function
-from discord.ext import commands
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
+import requests
 
-client = discord.Client()
-sad_words = ["sad", "depressed", "unhappy", "angry", "miserable", "depressing"]
+try:
+    import discord
+except ImportError:
+    discord = None
+from storage import get_db
+from keep_alive import keep_alive
 
-starter_encouragements = [
-  "Cheer up!",
-  "Hang in there.",
-  "You are a great person / bot!"
+# Initialize database storage adapter (Replit DB or LocalStorage)
+db = get_db()
+
+# Default sadness triggers and encouraging messages
+SAD_WORDS = ["sad", "depressed", "unhappy", "angry", "miserable", "depressing"]
+
+STARTER_ENCOURAGEMENTS = [
+    "Cheer up!",
+    "Hang in there.",
+    "You are a great person / bot!",
+    "Every day is a fresh start — keep moving forward!",
+    "You've got this! Take a deep breath and keep building."
 ]
 
 if "responding" not in db.keys():
-  db["responding"] = True
+    db["responding"] = True
 
-def get_quote():
-  response = requests.get("https://zenquotes.io/api/random")
-  json_data = json.loads(response.text)
-  quote = json_data[0]['q'] + " - " + json_data[0]['a']
-  return quote
 
-def update_encouragements(encouraging_message):
-  if "encouragements" in db.keys():
-    encouragements = db["encouragements"]
+def get_quote() -> str:
+    """Fetch an inspiring quote from ZenQuotes with local fallback."""
+    try:
+        response = requests.get("https://zenquotes.io/api/random", timeout=5)
+        if response.status_code == 200:
+            json_data = response.json()
+            if json_data and isinstance(json_data, list):
+                return f"{json_data[0]['q']} — {json_data[0]['a']}"
+    except Exception as e:
+        print(f"[Quote Fetch Warning] {e}")
+
+    fallback_quotes = [
+        "The best way to get started is to quit talking and begin doing. — Walt Disney",
+        "Don't let yesterday take up too much of today. — Will Rogers",
+        "It's not whether you get knocked down, it's whether you get up. — Vince Lombardi",
+        "Code is like humor. When you have to explain it, it's bad. — Cory House"
+    ]
+    return random.choice(fallback_quotes)
+
+
+def update_encouragements(encouraging_message: str):
+    """Add a new encouraging message to storage."""
+    encouragements = list(db.get("encouragements", []))
     encouragements.append(encouraging_message)
     db["encouragements"] = encouragements
-  else:
-    db["encouragements"] = [encouraging_message]
 
-def delete_encouragment(index):
-  encouragements = db["encouragements"]
-  if len(encouragements) > index:
-    del encouragements[index]
-    db["encouragements"] = encouragements
-  
-@client.event
-async def on_ready():
-  print('We have logged in as {0.user}'.format(client))
 
-@client.event
-async def on_message(message):
+def delete_encouragement(index: int) -> bool:
+    """Delete an encouraging message by its 0-based index."""
+    encouragements = list(db.get("encouragements", []))
+    if 0 <= index < len(encouragements):
+        encouragements.pop(index)
+        db["encouragements"] = encouragements
+        return True
+    return False
 
-  msg = message.content
-  
-  if message.author == client.user:
-    return
 
-  if msg.startswith('!inspire'):
-    quote = get_quote()
-    await message.channel.send('“ '+ quote +' “')
+def parse_duration(time_str: str) -> tuple[int, str]:
+    """Parse time string like 10s, 5m, 2h, 1d into seconds and human description."""
+    time_str = time_str.strip().lower()
+    if not time_str or len(time_str) < 2:
+        return 0, ""
+    unit = time_str[-1]
+    value_str = time_str[:-1]
 
-  if db["responding"]:
-    options = starter_encouragements
-    if "encouragements" in db.keys():
-      options.extend(db["encouragements"])
-    
-    if any(word in msg for word in sad_words):
-      await message.channel.send(random.choice(options))
+    if not value_str.isdigit():
+        return 0, ""
 
-  if msg.startswith('!add'):
-    encouraging_message = msg.split("!add ", 1)[1]
-    update_encouragements(encouraging_message)
-    await message.channel.send("New encouraging message added.")
+    val = int(value_str)
+    if unit == "s":
+        return val, f"{val} second(s)"
+    elif unit == "m":
+        return val * 60, f"{val} minute(s)"
+    elif unit == "h":
+        return val * 3600, f"{val} hour(s)"
+    elif unit == "d":
+        return val * 86400, f"{val} day(s)"
+    return 0, ""
 
-    if msg.startswith('!del'):
-      encouragements = []
-      if "encouragements" in db.keys():
-        index = int(msg.split("!del", 1)[1])
-        delete_encouragment(index)
-        encouragements = db["encouragements"]
-      await message.channel.send(encouragements)
 
-  if msg.startswith('!list'):
-    encouragements = []
-    if "encouragements" in db.keys():
-      encouragements = db["encouragements"]
-    await message.channel.send(encouragements.value)
+# Configure Discord client with modern message_content intents
+if discord:
+    intents = discord.Intents.default()
+    intents.message_content = True
+    client = discord.Client(intents=intents)
 
-  if msg.startswith('!responding'):
-    value = msg.split('!responding ',1)[1]
+    @client.event
+    async def on_ready():
+        print(f"Logged in successfully as {client.user} (ID: {client.user.id if client.user else 'Unknown'})")
+        print(f"Serving commands: !inspire, !add, !del, !list, !responding, !remind, !help")
 
-    if value.lower() == "true":
-      db["responding"] = True
-      await message.channel.send("Responding is on.")
-    else:
-      db["responding"] = False
-      await message.channel.send("Responding is off.")
+    @client.event
+    async def on_message(message: discord.Message):
+        if message.author == client.user:
+            return
 
-  # reminder base on time !!!
-  # {n}{s/m/h/d}
-  if msg.startswith('!remind'):
-    time = msg.split('!remind ', 1)[1]
-    reminder = msg.split('!remind ',1)[2]
-    print(time)
-    print(reminder)
-    user = message.author
-    embed = discord.Embed(color=0x55a7f7, timestamp=datetime.utcnow())
-    embed.set_footer(text="If you have any questions, suggestions or bug reports, please send me a message on Discord: @arham#2184", icon_url=f"{client.user.avatar_url}")
-    seconds = 0
-    if reminder is None:
-        embed.add_field(name='Warning', value='Please specify what do you want me to remind you about.') # Error message
-    if time.lower().endswith("d"):
-        seconds += int(time[:-1]) * 60 * 60 * 24
-        counter = f"{seconds // 60 // 60 // 24} days"
-    if time.lower().endswith("h"):
-        seconds += int(time[:-1]) * 60 * 60
-        counter = f"{seconds // 60 // 60} hours"
-    elif time.lower().endswith("m"):
-        seconds += int(time[:-1]) * 60
-        counter = f"{seconds // 60} minutes"
-    elif time.lower().endswith("s"):
-        seconds += int(time[:-1])
-        counter = f"{seconds} seconds"
-    if seconds == 0:
-        embed.add_field(name='Warning',
-                        value='Please specify a proper duration, send `reminder_help` for more information.')
-    elif seconds < 300:
-        embed.add_field(name='Warning',
-                        value='You have specified a too short duration!\nMinimum duration is 5 minutes.')
-    elif seconds > 7776000:
-        embed.add_field(name='Warning', value='You have specified a too long duration!\nMaximum duration is 90 days.')
-    else:
-      await message.channel.send(f"Alright, I will remind you about {reminder} in {counter}.")
+        msg = message.content.strip()
 
-      await asyncio.sleep(seconds)
-      await message.channel.send(f"Hi, you asked me to remind you about {reminder} {counter} ago.")
-      return
-    # await ctx.send(embed=embed)
-    await message.channel.send(embed=embed)
+        # !help command
+        if msg.startswith("!help"):
+            embed = discord.Embed(
+                title="🤖 Discord Bot Commands",
+                description="Your personal inspiration and reminder assistant.",
+                color=0x3b82f6,
+                timestamp=datetime.now(timezone.utc)
+            )
+            embed.add_field(name="!inspire", value="Fetch an inspiring daily quote", inline=False)
+            embed.add_field(name="!add <message>", value="Save a custom encouraging message", inline=False)
+            embed.add_field(name="!del <index>", value="Delete an encouragement by index", inline=False)
+            embed.add_field(name="!list", value="List all saved custom encouragements", inline=False)
+            embed.add_field(name="!responding <true/false>", value="Toggle automatic cheer-up responses", inline=False)
+            embed.add_field(name="!remind <duration> <message>", value="Set a reminder (e.g. `!remind 10m check oven`)", inline=False)
+            embed.set_footer(text="Created by Arham Eskafi (arham.dev)")
+            await message.channel.send(embed=embed)
+            return
 
-TOKEN = os.environ['TOKEN']
-keep_alive()
-client.run(TOKEN)
+        # !inspire command
+        if msg.startswith("!inspire"):
+            quote = get_quote()
+            await message.channel.send(f"“ {quote} ”")
+            return
+
+        # Automatic cheer-up responses for sad keywords
+        if db.get("responding", True):
+            options = list(STARTER_ENCOURAGEMENTS)
+            options.extend(list(db.get("encouragements", [])))
+            if any(word in msg.lower().split() for word in SAD_WORDS):
+                await message.channel.send(random.choice(options))
+
+        # !add command
+        if msg.startswith("!add"):
+            parts = msg.split("!add", 1)
+            if len(parts) > 1 and parts[1].strip():
+                encouraging_message = parts[1].strip()
+                update_encouragements(encouraging_message)
+                await message.channel.send(f"✅ Added new encouragement: *\"{encouraging_message}\"*")
+            else:
+                await message.channel.send("⚠️ Usage: `!add <your encouraging message>`")
+            return
+
+        # !del command
+        if msg.startswith("!del"):
+            parts = msg.split("!del", 1)
+            if len(parts) > 1 and parts[1].strip().isdigit():
+                index = int(parts[1].strip())
+                if delete_encouragement(index):
+                    await message.channel.send(f"🗑️ Deleted encouragement at index {index}.")
+                else:
+                    await message.channel.send(f"⚠️ Index {index} not found in database. Use `!list` to view valid indices.")
+            else:
+                await message.channel.send("⚠️ Usage: `!del <number_index>` (e.g. `!del 0`)")
+            return
+
+        # !list command
+        if msg.startswith("!list"):
+            encouragements = list(db.get("encouragements", []))
+            if not encouragements:
+                await message.channel.send("📭 No custom encouragements saved yet. Use `!add <message>` to add one.")
+            else:
+                formatted = "\n".join(f"`[{i}]` {item}" for i, item in enumerate(encouragements))
+                await message.channel.send(f"**Saved Encouragements:**\n{formatted}")
+            return
+
+        # !responding toggle
+        if msg.startswith("!responding"):
+            parts = msg.split("!responding", 1)
+            if len(parts) > 1:
+                val_str = parts[1].strip().lower()
+                if val_str == "true":
+                    db["responding"] = True
+                    await message.channel.send("🟢 Automatic responding is now **ON**.")
+                elif val_str == "false":
+                    db["responding"] = False
+                    await message.channel.send("🔴 Automatic responding is now **OFF**.")
+                else:
+                    await message.channel.send("⚠️ Usage: `!responding true` or `!responding false`")
+            return
+
+        # !remind command: !remind <duration> <message>
+        if msg.startswith("!remind"):
+            parts = msg.split(maxsplit=2)
+            avatar_url = client.user.display_avatar.url if client.user else None
+
+            embed = discord.Embed(color=0x55a7f7, timestamp=datetime.now(timezone.utc))
+            if avatar_url:
+                embed.set_footer(text="Discord Bot by Arham Eskafi (arham.dev)", icon_url=avatar_url)
+            else:
+                embed.set_footer(text="Discord Bot by Arham Eskafi (arham.dev)")
+
+            if len(parts) < 3:
+                embed.add_field(
+                    name="⚠️ Usage Error",
+                    value="Format: `!remind <duration> <message>`\nExample: `!remind 10m check deploy` or `!remind 2h gym session`"
+                )
+                await message.channel.send(embed=embed)
+                return
+
+            time_str, reminder_text = parts[1], parts[2]
+            seconds, human_duration = parse_duration(time_str)
+
+            if seconds <= 0:
+                embed.add_field(
+                    name="⚠️ Invalid Duration",
+                    value="Please specify valid duration suffix: `s` (seconds), `m` (minutes), `h` (hours), or `d` (days).\nExample: `!remind 30m team sync`"
+                )
+                await message.channel.send(embed=embed)
+                return
+
+            if seconds > 7776000:  # 90 days
+                embed.add_field(name="⚠️ Duration Too Long", value="Maximum supported reminder duration is 90 days.")
+                await message.channel.send(embed=embed)
+                return
+
+            await message.channel.send(f"⏰ Got it {message.author.mention}! I will remind you about **\"{reminder_text}\"** in **{human_duration}**.")
+            await asyncio.sleep(seconds)
+            await message.channel.send(f"🔔 {message.author.mention} **Reminder:** {reminder_text} *(set {human_duration} ago)*")
+else:
+    client = None
+
+
+def main():
+    token = os.getenv("DISCORD_TOKEN") or os.getenv("TOKEN")
+    if not token:
+        print("[Error] Discord bot token is missing!")
+        print("Please set the DISCORD_TOKEN environment variable (or copy .env.example to .env).")
+        sys.exit(1)
+
+    # Launch background keep-alive web server
+    keep_alive()
+
+    # Run Discord client
+    client.run(token)
+
+
+if __name__ == "__main__":
+    main()
